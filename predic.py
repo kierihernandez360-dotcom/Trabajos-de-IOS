@@ -34,4 +34,4 @@ else:
 
 # Opción para ver todas las posibilidades
 with st.expander("Ver lista de opciones"):
-    st.write(", ".join(opciones))S
+    st.write(", ".join(opciones))
