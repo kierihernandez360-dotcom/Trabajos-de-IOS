@@ -35,26 +35,34 @@ def get_df(query, params=()):
     with sqlite3.connect(DB_NAME) as conn:
         return pd.read_sql_query(query, conn, params=params)
 
-# --- FUNCIÓN PARA CARGAR 50 DATOS DE PRUEBA ---
+# --- FUNCIÓN PARA CARGAR 50 DATOS DE PRUEBA (ACTUALIZADA: ROPA MULTISEX) ---
 def cargar_50_datos():
-    productos = ["Bra Push Up", "Panty Clásico", "Faja Reductora", "Pijama Seda", "Baby Doll", "Bra Deportivo", "Body Encaje"]
-    modelos = ["MOD-101", "MOD-202", "MOD-303", "MOD-404", "MOD-505", "MOD-606", "MOD-707", "MOD-808"]
-    colores = ["Negro", "Blanco", "Nude", "Rojo", "Azul Marino", "Rosa Pastel"]
-    tallas = ["CH", "M", "G", "XG", "32B", "34B", "36B", "38B"]
+    productos = [
+        "Sudadera Hoodie", "Camisa Formal", "Pantalón Denim", "Playera Oversize", 
+        "Chaqueta Bomber", "Short Deportivo", "Jersey Lana", "Cargo Pants"
+    ]
+    modelos = [f"MOD-{random.randint(100, 999)}" for _ in range(15)]
+    colores = ["Negro", "Gris Jaspe", "Azul Marino", "Verde Militar", "Blanco", "Beige", "Vino"]
+    tallas = ["CH", "M", "G", "XG", "28", "30", "32", "34", "36"]
 
     datos_inventario = []
+    combinaciones_usadas = set()
+
     while len(datos_inventario) < 50:
         prod = random.choice(productos)
         mod = random.choice(modelos)
         col = random.choice(colores)
         tal = random.choice(tallas)
         
-        # Evitar duplicados
-        if not any(x[1] == mod and x[2] == col and x[3] == tal for x in datos_inventario):
-            stock = random.randint(5, 30)
-            p_compra = round(random.uniform(100.0, 350.0), 2)
-            p_venta = round(p_compra * 1.6, 2)
+        ID_unico = (prod, mod, col, tal)
+
+        if ID_unico not in combinaciones_usadas:
+            stock = random.randint(5, 40)
+            p_compra = round(random.uniform(150.0, 600.0), 2)
+            p_venta = round(p_compra * 1.5, 2)
+            
             datos_inventario.append((prod, mod, col, tal, stock, p_compra, p_venta, ""))
+            combinaciones_usadas.add(ID_unico)
 
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
@@ -105,7 +113,7 @@ if 'ticket_a_imprimir' not in st.session_state: st.session_state.ticket_a_imprim
 
 # --- NAVEGACIÓN ---
 st.sidebar.title("SISTEMA ILUSION")
-menu = ["📦 Inventario", "🛒 Punto de Venta", "📝 Apartados", "📊 Corte de Caja", "📉 Historial", "🛠 Admin", "💾 Respaldos"]
+menu = [" Inventario", " Punto de Venta", " Apartados", " Corte de Caja", " Historial", " Admin", " Respaldos"]
 choice = st.sidebar.selectbox("Opciones", menu)
 
 if st.session_state.ticket_a_imprimir:
@@ -114,18 +122,18 @@ if st.session_state.ticket_a_imprimir:
 
 # --- LÓGICA DE SECCIONES ---
 
-if choice == "📦 Inventario":
+if choice == " Inventario":
     st.header("Inventario de Prendas")
     df_inv = get_df("SELECT * FROM inventario")
     if df_inv.empty:
         st.warning("El inventario está vacío.")
-        if st.button("✨ Cargar 50 datos de prueba"):
+        if st.button(" Cargar 50 datos de prueba"):
             cargar_50_datos()
             st.rerun()
     else:
         st.dataframe(df_inv, use_container_width=True)
 
-elif choice == "🛒 Punto de Venta":
+elif choice == " Punto de Venta":
     st.header("Nueva Operación")
     df_inv = get_df("SELECT * FROM inventario WHERE stock > 0")
     
@@ -142,14 +150,14 @@ elif choice == "🛒 Punto de Venta":
             st.info(f"Stock: {item['stock']} | Precio: ${item['p_venta']:,.2f}")
             cant = st.number_input("Cantidad", 1, int(item['stock']))
             
-            if st.button("➕ Agregar al Carrito", use_container_width=True):
+            if st.button(" Agregar al Carrito", use_container_width=True):
                 st.session_state.carrito.append({
                     'producto': item['producto'], 'modelo': item['modelo'], 'color': item['color'],
                     'talla': item['talla'], 'cantidad': int(cant), 'precio': float(item['p_venta']), 'subtotal': float(item['p_venta']*cant)
                 })
                 st.rerun()
             
-            if st.button("🗑️ Limpiar Todo", type="secondary", use_container_width=True):
+            if st.button(" Limpiar Todo", type="secondary", use_container_width=True):
                 st.session_state.carrito = []
                 st.rerun()
 
@@ -158,11 +166,11 @@ elif choice == "🛒 Punto de Venta":
                 st.subheader("Resumen de Venta")
                 st.table(pd.DataFrame(st.session_state.carrito)[['modelo', 'talla', 'cantidad', 'subtotal']])
                 total_v = sum(i['subtotal'] for i in st.session_state.carrito)
-                if st.button(f"✅ Finalizar e Imprimir (${total_v:,.2f})", type="primary", use_container_width=True):
+                if st.button(f" Finalizar e Imprimir (${total_v:,.2f})", type="primary", use_container_width=True):
                     t_id = str(uuid.uuid4())[:8].upper()
                     now = datetime.now()
                     for i in st.session_state.carrito:
-                        run_query("INSERT INTO ventas VALUES (?,?,?,?,?,?,?,?,?,?,?)", 
+                        run_query("INSERT INTO ventas VALUES (?,?,?,?,?,?,?,?,?,?)", 
                                   (t_id, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), i['producto'], i['modelo'], i['color'], i['talla'], i['cantidad'], i['precio'], i['subtotal'], "COMPLETADA"))
                         run_query("UPDATE inventario SET stock = stock - ? WHERE modelo=? AND color=? AND talla=?", (i['cantidad'], i['modelo'], i['color'], i['talla']))
                     st.session_state.ticket_a_imprimir = generar_ticket_html("TICKET VENTA", t_id, st.session_state.carrito, total_v)
@@ -171,7 +179,7 @@ elif choice == "🛒 Punto de Venta":
     else:
         st.error("No hay stock disponible en el inventario.")
 
-elif choice == "📝 Apartados":
+elif choice == " Apartados":
     st.header("Control de Apartados")
     df_inv = get_df("SELECT * FROM inventario WHERE stock > 0")
     if not df_inv.empty:
@@ -190,7 +198,7 @@ elif choice == "📝 Apartados":
     else:
         st.info("No hay productos disponibles para apartar.")
 
-elif choice == "📊 Corte de Caja":
+elif choice == " Corte de Caja":
     st.header("Corte de Caja y Utilidades")
     periodo = st.radio("Seleccione Periodo:", ["Hoy", "Esta Semana", "Este Mes"], horizontal=True)
     hoy = datetime.now()
@@ -218,18 +226,18 @@ elif choice == "📊 Corte de Caja":
     else:
         st.info("Sin ventas en este periodo.")
 
-elif choice == "📉 Historial":
+elif choice == " Historial":
     st.header("Historial de Operaciones")
     st.subheader("Ventas")
     st.dataframe(get_df("SELECT * FROM ventas"), use_container_width=True)
     st.subheader("Apartados")
     st.dataframe(get_df("SELECT * FROM apartados"), use_container_width=True)
 
-elif choice == "🛠 Admin":
+elif choice == " Admin":
     st.header("Administración de Inventario")
     with st.form("adm"):
         c1, c2, c3, c4 = st.columns(4)
-        p = c1.text_input("Producto (ej. Bra)")
+        p = c1.text_input("Producto (ej. Sudadera)")
         m = c2.text_input("Modelo (ej. MOD-01)")
         col = c3.text_input("Color")
         t = c4.text_input("Talla")
@@ -242,12 +250,12 @@ elif choice == "🛠 Admin":
                 st.success("Producto registrado!")
             else: st.error("Faltan datos.")
     
-    if st.button("⚠️ Cargar 50 datos demo ahora"):
+    if st.button(" Cargar 50 datos demo de Ropa"):
         cargar_50_datos()
         st.rerun()
 
-elif choice == "💾 Respaldos":
+elif choice == " Respaldos":
     st.header("Respaldos")
     if os.path.exists(DB_NAME):
         with open(DB_NAME, "rb") as f:
-            st.download_button("📥 Descargar Base de Datos", f, f"Backup_Ilusion_{datetime.now().strftime('%Y%m%d')}.db")
+            st.download_button(" Descargar Base de Datos", f, f"Backup_Ilusion_{datetime.now().strftime('%Y%m%d')}.db")
