@@ -7,22 +7,24 @@ import os
 import streamlit.components.v1 as components
 
 # --- CONFIGURACIÓN BASE DE DATOS ---
-DB_NAME = "ilusion_unigenero.db"
+DB_NAME = "ilusion_unigenero_v2.db"
 
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
-        # Tabla inventario adaptada a ropa unigénero
+        # Se añade 'color' y 'talla' explícitamente a la estructura principal
         cursor.execute('''CREATE TABLE IF NOT EXISTS inventario 
-                          (id_item INTEGER PRIMARY KEY, producto TEXT, modelo TEXT, 
-                           color TEXT, talla TEXT, stock INTEGER, p_compra REAL, 
-                           p_venta REAL, categoria TEXT)''')
+                          (id_item INTEGER PRIMARY KEY, 
+                           producto TEXT DEFAULT 'Sin asignar', 
+                           modelo TEXT DEFAULT '-', 
+                           color TEXT DEFAULT '-', 
+                           talla TEXT DEFAULT '-', 
+                           stock INTEGER DEFAULT 0, 
+                           p_compra REAL DEFAULT 0.0, 
+                           p_venta REAL DEFAULT 0.0)''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS ventas 
                           (transaccion_id TEXT, fecha TEXT, hora TEXT, modelo TEXT, 
-                           talla TEXT, cantidad INTEGER, p_venta REAL, total REAL)''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS apartados 
-                          (id TEXT, cliente TEXT, fecha TEXT, modelo TEXT, 
-                           talla TEXT, cantidad INTEGER, estado TEXT)''')
+                           color TEXT, talla TEXT, cantidad INTEGER, p_venta REAL, total REAL)''')
         conn.commit()
 
 def run_query(query, params=()):
@@ -35,7 +37,6 @@ def get_df(query, params=()):
     with sqlite3.connect(DB_NAME) as conn:
         return pd.read_sql_query(query, conn, params=params)
 
-# --- FUNCIÓN DE IMPRESIÓN ---
 def ejecutar_impresion(html_content):
     unique_id = str(uuid.uuid4())[:8]
     component_script = f"""
@@ -44,7 +45,7 @@ def ejecutar_impresion(html_content):
         (function() {{
             var content = document.getElementById('ticket-{unique_id}').innerHTML;
             var win = window.open('', 'PRINT', 'height=600,width=400');
-            win.document.write('<html><head><title>Imprimir Ticket</title></head><body>' + content + '</body></html>');
+            win.document.write('<html><head><title>Imprimir</title></head><body style="margin:0;">' + content + '</body></html>');
             win.document.close();
             win.focus();
             win.print();
@@ -53,21 +54,6 @@ def ejecutar_impresion(html_content):
     </script>
     """
     components.html(component_script, height=0)
-
-def generar_ticket_html(titulo, id_doc, items, total, cliente=None):
-    fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
-    filas = "".join([f"<tr><td>{it['modelo']}</td><td align='center'>{it['cantidad']}</td><td align='right'>${it['subtotal']:,.2f}</td></tr>" for it in items])
-    cli_html = f'<p style="font-size:11px;"><b>Cliente:</b> {cliente}</p>' if cliente else ''
-    return f"""
-    <div style="font-family: 'Courier New', monospace; width: 250px; padding: 10px; border: 1px solid #000;">
-        <center><h2 style="margin:0;">ILUSIÓN</h2><p style="font-size:12px; margin:0;">Ropa Unigénero</p></center>
-        <hr>
-        <p style="font-size:11px;"><b>{titulo}</b>: #{id_doc}<br><b>Fecha:</b> {fecha}</p>
-        {cli_html}
-        <table style="width:100%; font-size:10px;">{filas}</table>
-        <hr><h3 align="right">TOTAL: ${total:,.2f}</h3>
-    </div>
-    """
 
 # --- INICIALIZACIÓN ---
 st.set_page_config(page_title="Ilusión Unigénero", layout="wide")
@@ -78,124 +64,121 @@ if 'ticket_a_imprimir' not in st.session_state: st.session_state.ticket_a_imprim
 
 # --- NAVEGACIÓN ---
 st.sidebar.title("SISTEMA ILUSIÓN")
-menu = ["📦 Inventario", "🛒 Punto de Venta", "📝 Apartados", "📊 Corte de Caja", "📉 Historial", "🛠 Admin", "💾 Respaldos"]
-choice = st.sidebar.selectbox("Menú Principal", menu)
+menu = ["📦 Ver Inventario", "🛒 Punto de Venta", "🛠 Admin (Lote 1-70)", "📊 Corte de Caja", "💾 Respaldos"]
+choice = st.sidebar.selectbox("Seleccione opción", menu)
 
 if st.session_state.ticket_a_imprimir:
     ejecutar_impresion(st.session_state.ticket_a_imprimir)
     st.session_state.ticket_a_imprimir = None
 
-# --- 1. INVENTARIO ---
-if choice == "📦 Inventario":
-    st.header("Inventario de Ropa Unigénero")
-    df = get_df("SELECT id_item as '#', producto, modelo, color, talla, stock, p_venta as 'Precio' FROM inventario ORDER BY id_item ASC")
+# --- 1. VER INVENTARIO ---
+if choice == "📦 Ver Inventario":
+    st.header("Inventario Completo (Unigénero)")
+    df = get_df("SELECT id_item as 'N°', producto as 'Prenda', modelo, color, talla, stock, p_venta as 'Precio' FROM inventario ORDER BY id_item ASC")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 # --- 2. PUNTO DE VENTA ---
 elif choice == "🛒 Punto de Venta":
-    st.header("Venta de Prendas")
+    st.header("Registrar Venta")
+    # Solo muestra lo que tiene stock
     df_inv = get_df("SELECT * FROM inventario WHERE stock > 0")
     
     if not df_inv.empty:
-        c1, c2 = st.columns([1, 1.5])
+        c1, c2 = st.columns([1, 1.2])
         with c1:
-            # Selector por Modelo
-            mod_sel = st.selectbox("Seleccionar Modelo", sorted(df_inv['modelo'].unique()))
-            df_f = df_inv[df_inv['modelo'] == mod_sel]
+            # Seleccionamos por ID o por nombre para facilitar
+            df_inv['etiqueta'] = df_inv['id_item'].astype(str) + " - " + df_inv['producto'] + " (" + df_inv['color'] + ")"
+            opcion = st.selectbox("Buscar Prenda", df_inv['etiqueta'])
+            item_sel = df_inv[df_inv['etiqueta'] == opcion].iloc[0]
             
-            talla_sel = st.selectbox("Talla", sorted(df_f['talla'].unique()))
-            item = df_f[df_f['talla'] == talla_sel].iloc[0]
+            st.info(f"**Detalles:** {item_sel['modelo']} | Color: {item_sel['color']} | Talla: {item_sel['talla']}")
+            st.success(f"**Disponible:** {item_sel['stock']} pzs | **Precio:** ${item_sel['p_venta']:,.2f}")
             
-            st.success(f"Disponible: {item['stock']} piezas | Precio: ${item['p_venta']:,.2f}")
-            cant = st.number_input("Cantidad a vender", 1, int(item['stock']))
+            cant = st.number_input("Cantidad", 1, int(item_sel['stock']))
             
-            if st.button("➕ Agregar a la lista", use_container_width=True):
+            if st.button("➕ Agregar al Carrito", use_container_width=True):
                 st.session_state.carrito.append({
-                    'modelo': item['modelo'], 'talla': item['talla'], 
-                    'cantidad': cant, 'precio': item['p_venta'], 'subtotal': item['p_venta']*cant
+                    'id': item_sel['id_item'], 'modelo': item_sel['modelo'], 'color': item_sel['color'],
+                    'talla': item_sel['talla'], 'cantidad': cant, 'precio': item_sel['p_venta'], 'subtotal': item_sel['p_venta']*cant
                 })
                 st.rerun()
-
-            if st.button("🗑️ Vaciar Lista", type="secondary"):
+            
+            if st.button("🗑️ Vaciar Carrito"):
                 st.session_state.carrito = []
                 st.rerun()
 
         with c2:
             if st.session_state.carrito:
-                st.subheader("Lista de Compra")
-                df_car = pd.DataFrame(st.session_state.carrito)
-                st.table(df_car[['modelo', 'talla', 'cantidad', 'subtotal']])
-                total_v = df_car['subtotal'].sum()
+                st.subheader("Resumen")
+                df_c = pd.DataFrame(st.session_state.carrito)
+                st.table(df_c[['modelo', 'color', 'talla', 'cantidad', 'subtotal']])
+                total = df_c['subtotal'].sum()
                 
-                if st.button(f"🛒 Finalizar Venta (${total_v:,.2f})", type="primary", use_container_width=True):
+                if st.button(f"✅ Cobrar ${total:,.2f}", type="primary", use_container_width=True):
                     t_id = str(uuid.uuid4())[:6].upper()
-                    now = datetime.now()
                     for i in st.session_state.carrito:
-                        run_query("INSERT INTO ventas VALUES (?,?,?,?,?,?,?,?)", 
-                                  (t_id, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), i['modelo'], i['talla'], i['cantidad'], i['precio'], i['subtotal']))
-                        run_query("UPDATE inventario SET stock = stock - ? WHERE modelo=? AND talla=?", (i['cantidad'], i['modelo'], i['talla']))
-                    st.session_state.ticket_a_imprimir = generar_ticket_html("TICKET VENTA", t_id, st.session_state.carrito, total_v)
+                        run_query("INSERT INTO ventas VALUES (?,?,?,?,?,?,?,?,?)", 
+                                  (t_id, datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%H:%M"), 
+                                   i['modelo'], i['color'], i['talla'], i['cantidad'], i['precio'], i['subtotal']))
+                        run_query("UPDATE inventario SET stock = stock - ? WHERE id_item = ?", (i['cantidad'], i['id']))
+                    st.success("Venta Exitosa")
                     st.session_state.carrito = []
                     st.rerun()
 
-# --- 6. ADMIN (LISTA DEL 1 AL 70) ---
-elif choice == "🛠 Admin":
-    st.header("Configuración de Inventario (Prendas 1 - 70)")
+# --- 3. ADMIN (CONFIGURAR 1-70) ---
+elif choice == "🛠 Admin (Lote 1-70)":
+    st.header("Gestión de Espacios 1 al 70")
     
-    # Crear los 70 espacios si la base está vacía
-    if st.button("🔄 Inicializar/Resetear espacios 1-70"):
+    # Botón para crear los 70 registros si la base es nueva
+    if st.button("⚡ Crear/Resetear espacios del 1 al 70"):
         for i in range(1, 71):
-            run_query("INSERT OR IGNORE INTO inventario (id_item, producto, modelo, stock, p_compra, p_venta) VALUES (?,?,?,?,?,?)", 
-                      (i, "Ropa", f"Prenda {i}", 0, 0.0, 0.0))
-        st.success("Espacios del 1 al 70 listos.")
+            run_query("INSERT OR IGNORE INTO inventario (id_item) VALUES (?)", (i,))
+        st.success("Se han habilitado los 70 espacios correctamente.")
 
-    tab1, tab2 = st.tabs(["Editar Prenda Individual", "Vista Rápida"])
+    n_prenda = st.number_input("Selecciona el número de prenda a configurar (1-70):", 1, 70)
     
-    with tab1:
-        num_item = st.number_input("Número de Prenda a editar (1-70)", 1, 70)
-        curr = get_df("SELECT * FROM inventario WHERE id_item = ?", (num_item,))
-        
-        if not curr.empty:
-            with st.form("edit_form"):
-                col1, col2 = st.columns(2)
-                nombre = col1.text_input("Nombre/Tipo de Prenda", curr.iloc[0]['producto'])
-                modelo = col2.text_input("Código/Modelo", curr.iloc[0]['modelo'])
-                
-                c3, c4, c5 = st.columns(3)
-                talla = c3.selectbox("Talla", ["N/A", "XS", "S", "M", "L", "XL", "Única"], index=0)
-                color = c4.text_input("Color", curr.iloc[0]['color'] if curr.iloc[0]['color'] else "Neutro")
-                stock = c5.number_input("Cantidad en Stock", 0, 500, int(curr.iloc[0]['stock']))
-                
-                c6, c7 = st.columns(2)
-                pc = c6.number_input("Costo Compra $", 0.0, 10000.0, float(curr.iloc[0]['p_compra']))
-                pv = c7.number_input("Precio Venta $", 0.0, 10000.0, float(curr.iloc[0]['p_venta']))
-                
-                if st.form_submit_button("Actualizar Prenda"):
-                    run_query("UPDATE inventario SET producto=?, modelo=?, color=?, talla=?, stock=?, p_compra=?, p_venta=? WHERE id_item=?",
-                              (nombre, modelo, color, talla, stock, pc, pv, num_item))
-                    st.success(f"Prenda {num_item} actualizada.")
-                    st.rerun()
-
-    with tab2:
-        st.dataframe(get_df("SELECT * FROM inventario ORDER BY id_item ASC"), use_container_width=True)
+    # Traer datos actuales de ese número
+    datos = get_df("SELECT * FROM inventario WHERE id_item = ?", (n_prenda,))
+    
+    if not datos.empty:
+        st.subheader(f"Editando Prenda N° {n_prenda}")
+        with st.form("form_admin"):
+            col1, col2 = st.columns(2)
+            # Aquí es donde defines qué es la prenda y qué color tiene
+            nombre = col1.text_input("¿Qué prenda es? (ej. Playera, Pantalón)", datos.iloc[0]['producto'])
+            modelo = col2.text_input("Modelo / Código", datos.iloc[0]['modelo'])
+            
+            col3, col4, col5 = st.columns(3)
+            color = col3.text_input("Color", datos.iloc[0]['color'])
+            talla = col4.text_input("Talla (ej. CH, M, G, Única)", datos.iloc[0]['talla'])
+            stock = col5.number_input("Cantidad en Existencia", 0, 1000, int(datos.iloc[0]['stock']))
+            
+            col6, col7 = st.columns(2)
+            p_c = col6.number_input("Costo de Compra $", 0.0, 5000.0, float(datos.iloc[0]['p_compra']))
+            p_v = col7.number_input("Precio de Venta $", 0.0, 5000.0, float(datos.iloc[0]['p_venta']))
+            
+            if st.form_submit_button("💾 Guardar Cambios en Espacio " + str(n_prenda)):
+                run_query("""UPDATE inventario SET producto=?, modelo=?, color=?, talla=?, 
+                             stock=?, p_compra=?, p_venta=? WHERE id_item=?""",
+                          (nombre, modelo, color, talla, stock, p_c, p_v, n_prenda))
+                st.success(f"¡Prenda {n_prenda} actualizada!")
+                st.rerun()
 
 # --- 4. CORTE DE CAJA ---
 elif choice == "📊 Corte de Caja":
-    st.header("Reporte de Ganancias")
-    periodo = st.radio("Periodo:", ["Hoy", "Este Mes"], horizontal=True)
-    f_busqueda = datetime.now().strftime("%Y-%m-%d") if periodo == "Hoy" else datetime.now().strftime("%Y-%m-") + "%"
+    st.header("Corte de Caja")
+    fecha = st.date_input("Selecciona el día", datetime.now())
+    df_v = get_df("SELECT * FROM ventas WHERE fecha = ?", (fecha.strftime("%Y-%m-%d"),))
     
-    df_v = get_df("SELECT * FROM ventas WHERE fecha LIKE ?", (f_busqueda,))
     if not df_v.empty:
-        total = df_v['total'].sum()
-        st.metric("Total Vendido", f"${total:,.2f}")
+        st.metric("Venta Total del Día", f"${df_v['total'].sum():,.2f}")
         st.dataframe(df_v, use_container_width=True)
     else:
-        st.warning("No hay ventas en este periodo.")
+        st.info("No hay ventas registradas en esta fecha.")
 
-# --- 7. RESPALDOS ---
+# --- 5. RESPALDOS ---
 elif choice == "💾 Respaldos":
     st.header("Respaldos")
     if os.path.exists(DB_NAME):
         with open(DB_NAME, "rb") as f:
-            st.download_button("📥 Descargar Base de Datos", f, "respaldo_ilusion.db")
+            st.download_button("📥 Descargar Base de Datos", f, "respaldo_inventario.db")
